@@ -412,6 +412,7 @@ static const AVOption drawtext_options[]= {
         { "monochrome",                  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_MONOCHROME },                  .flags = FLAGS, .unit = "ft_load_flags" },
         { "linear_design",               NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_LINEAR_DESIGN },               .flags = FLAGS, .unit = "ft_load_flags" },
         { "no_autohint",                 NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_NO_AUTOHINT },                 .flags = FLAGS, .unit = "ft_load_flags" },
+        { "load_color",                  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = FT_LOAD_COLOR },                       .flags = FLAGS, .unit = "ft_load_flags" },
     { NULL }
 };
 
