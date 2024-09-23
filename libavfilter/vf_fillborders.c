@@ -608,11 +608,7 @@ static int config_input(AVFilterLink *inlink)
         inlink->w <= s->right ||
         inlink->h < s->top + s->bottom ||
         inlink->h <= s->top ||
-        inlink->h <= s->bottom ||
-        inlink->w < s->left * 2 ||
-        inlink->w < s->right * 2 ||
-        inlink->h < s->top * 2 ||
-        inlink->h < s->bottom * 2) {
+        inlink->h <= s->bottom) {
         av_log(ctx, AV_LOG_ERROR, "Borders are bigger than input frame size.\n");
         return AVERROR(EINVAL);
     }
