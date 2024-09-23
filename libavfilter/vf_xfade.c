@@ -127,6 +127,11 @@ typedef struct XFadeContext {
     void (*transitionf)(AVFilterContext *ctx, const AVFrame *a, const AVFrame *b, AVFrame *out, float progress,
                         int slice_start, int slice_end, int jobnr);
 
+    char *easing_str; // easing name with optional args
+    char *transition_str; // transition name with optional args
+    int reverse; // reverse option bit flags (enum ReverseOpts)
+    struct XFadeEasingContext *k; // xfade-easing data
+
     AVExpr *e;
 } XFadeContext;
 
@@ -158,77 +163,81 @@ static const enum AVPixelFormat pix_fmts[] = {
     AV_PIX_FMT_NONE
 };
 
+static void xe_data_free(struct XFadeEasingContext *k);
 static av_cold void uninit(AVFilterContext *ctx)
 {
     XFadeContext *s = ctx->priv;
 
     av_expr_free(s->e);
+    xe_data_free(s->k);
 }
 
 #define OFFSET(x) offsetof(XFadeContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
 static const AVOption xfade_options[] = {
-    { "transition", "set cross fade transition", OFFSET(transition), AV_OPT_TYPE_INT, {.i64=FADE}, -1, NB_TRANSITIONS-1, FLAGS, "transition" },
-    {   "custom",    "custom transition",     0, AV_OPT_TYPE_CONST, {.i64=CUSTOM},    0, 0, FLAGS, "transition" },
-    {   "fade",      "fade transition",       0, AV_OPT_TYPE_CONST, {.i64=FADE},      0, 0, FLAGS, "transition" },
-    {   "wipeleft",  "wipe left transition",  0, AV_OPT_TYPE_CONST, {.i64=WIPELEFT},  0, 0, FLAGS, "transition" },
-    {   "wiperight", "wipe right transition", 0, AV_OPT_TYPE_CONST, {.i64=WIPERIGHT}, 0, 0, FLAGS, "transition" },
-    {   "wipeup",    "wipe up transition",    0, AV_OPT_TYPE_CONST, {.i64=WIPEUP},    0, 0, FLAGS, "transition" },
-    {   "wipedown",  "wipe down transition",  0, AV_OPT_TYPE_CONST, {.i64=WIPEDOWN},  0, 0, FLAGS, "transition" },
-    {   "slideleft",  "slide left transition",  0, AV_OPT_TYPE_CONST, {.i64=SLIDELEFT},  0, 0, FLAGS, "transition" },
-    {   "slideright", "slide right transition", 0, AV_OPT_TYPE_CONST, {.i64=SLIDERIGHT}, 0, 0, FLAGS, "transition" },
-    {   "slideup",    "slide up transition",    0, AV_OPT_TYPE_CONST, {.i64=SLIDEUP},    0, 0, FLAGS, "transition" },
-    {   "slidedown",  "slide down transition",  0, AV_OPT_TYPE_CONST, {.i64=SLIDEDOWN},  0, 0, FLAGS, "transition" },
-    {   "circlecrop", "circle crop transition", 0, AV_OPT_TYPE_CONST, {.i64=CIRCLECROP}, 0, 0, FLAGS, "transition" },
-    {   "rectcrop",   "rect crop transition",   0, AV_OPT_TYPE_CONST, {.i64=RECTCROP},   0, 0, FLAGS, "transition" },
-    {   "distance",   "distance transition",    0, AV_OPT_TYPE_CONST, {.i64=DISTANCE},   0, 0, FLAGS, "transition" },
-    {   "fadeblack",  "fadeblack transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEBLACK},  0, 0, FLAGS, "transition" },
-    {   "fadewhite",  "fadewhite transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEWHITE},  0, 0, FLAGS, "transition" },
-    {   "radial",     "radial transition",      0, AV_OPT_TYPE_CONST, {.i64=RADIAL},     0, 0, FLAGS, "transition" },
-    {   "smoothleft", "smoothleft transition",  0, AV_OPT_TYPE_CONST, {.i64=SMOOTHLEFT}, 0, 0, FLAGS, "transition" },
-    {   "smoothright","smoothright transition", 0, AV_OPT_TYPE_CONST, {.i64=SMOOTHRIGHT},0, 0, FLAGS, "transition" },
-    {   "smoothup",   "smoothup transition",    0, AV_OPT_TYPE_CONST, {.i64=SMOOTHUP},   0, 0, FLAGS, "transition" },
-    {   "smoothdown", "smoothdown transition",  0, AV_OPT_TYPE_CONST, {.i64=SMOOTHDOWN}, 0, 0, FLAGS, "transition" },
-    {   "circleopen", "circleopen transition",  0, AV_OPT_TYPE_CONST, {.i64=CIRCLEOPEN}, 0, 0, FLAGS, "transition" },
-    {   "circleclose","circleclose transition", 0, AV_OPT_TYPE_CONST, {.i64=CIRCLECLOSE},0, 0, FLAGS, "transition" },
-    {   "vertopen",   "vert open transition",   0, AV_OPT_TYPE_CONST, {.i64=VERTOPEN},   0, 0, FLAGS, "transition" },
-    {   "vertclose",  "vert close transition",  0, AV_OPT_TYPE_CONST, {.i64=VERTCLOSE},  0, 0, FLAGS, "transition" },
-    {   "horzopen",   "horz open transition",   0, AV_OPT_TYPE_CONST, {.i64=HORZOPEN},   0, 0, FLAGS, "transition" },
-    {   "horzclose",  "horz close transition",  0, AV_OPT_TYPE_CONST, {.i64=HORZCLOSE},  0, 0, FLAGS, "transition" },
-    {   "dissolve",   "dissolve transition",    0, AV_OPT_TYPE_CONST, {.i64=DISSOLVE},   0, 0, FLAGS, "transition" },
-    {   "pixelize",   "pixelize transition",    0, AV_OPT_TYPE_CONST, {.i64=PIXELIZE},   0, 0, FLAGS, "transition" },
-    {   "diagtl",     "diag tl transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGTL},     0, 0, FLAGS, "transition" },
-    {   "diagtr",     "diag tr transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGTR},     0, 0, FLAGS, "transition" },
-    {   "diagbl",     "diag bl transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGBL},     0, 0, FLAGS, "transition" },
-    {   "diagbr",     "diag br transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGBR},     0, 0, FLAGS, "transition" },
-    {   "hlslice",    "hl slice transition",    0, AV_OPT_TYPE_CONST, {.i64=HLSLICE},    0, 0, FLAGS, "transition" },
-    {   "hrslice",    "hr slice transition",    0, AV_OPT_TYPE_CONST, {.i64=HRSLICE},    0, 0, FLAGS, "transition" },
-    {   "vuslice",    "vu slice transition",    0, AV_OPT_TYPE_CONST, {.i64=VUSLICE},    0, 0, FLAGS, "transition" },
-    {   "vdslice",    "vd slice transition",    0, AV_OPT_TYPE_CONST, {.i64=VDSLICE},    0, 0, FLAGS, "transition" },
-    {   "hblur",      "hblur transition",       0, AV_OPT_TYPE_CONST, {.i64=HBLUR},      0, 0, FLAGS, "transition" },
-    {   "fadegrays",  "fadegrays transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEGRAYS},  0, 0, FLAGS, "transition" },
-    {   "wipetl",     "wipe tl transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPETL},     0, 0, FLAGS, "transition" },
-    {   "wipetr",     "wipe tr transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPETR},     0, 0, FLAGS, "transition" },
-    {   "wipebl",     "wipe bl transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPEBL},     0, 0, FLAGS, "transition" },
-    {   "wipebr",     "wipe br transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPEBR},     0, 0, FLAGS, "transition" },
-    {   "squeezeh",   "squeeze h transition",   0, AV_OPT_TYPE_CONST, {.i64=SQUEEZEH},   0, 0, FLAGS, "transition" },
-    {   "squeezev",   "squeeze v transition",   0, AV_OPT_TYPE_CONST, {.i64=SQUEEZEV},   0, 0, FLAGS, "transition" },
-    {   "zoomin",     "zoom in transition",     0, AV_OPT_TYPE_CONST, {.i64=ZOOMIN},     0, 0, FLAGS, "transition" },
-    {   "fadefast",   "fast fade transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEFAST},   0, 0, FLAGS, "transition" },
-    {   "fadeslow",   "slow fade transition",   0, AV_OPT_TYPE_CONST, {.i64=FADESLOW},   0, 0, FLAGS, "transition" },
-    {   "hlwind",     "hl wind transition",     0, AV_OPT_TYPE_CONST, {.i64=HLWIND},     0, 0, FLAGS, "transition" },
-    {   "hrwind",     "hr wind transition",     0, AV_OPT_TYPE_CONST, {.i64=HRWIND},     0, 0, FLAGS, "transition" },
-    {   "vuwind",     "vu wind transition",     0, AV_OPT_TYPE_CONST, {.i64=VUWIND},     0, 0, FLAGS, "transition" },
-    {   "vdwind",     "vd wind transition",     0, AV_OPT_TYPE_CONST, {.i64=VDWIND},     0, 0, FLAGS, "transition" },
-    {   "coverleft",  "cover left transition",  0, AV_OPT_TYPE_CONST, {.i64=COVERLEFT},  0, 0, FLAGS, "transition" },
-    {   "coverright", "cover right transition", 0, AV_OPT_TYPE_CONST, {.i64=COVERRIGHT}, 0, 0, FLAGS, "transition" },
-    {   "coverup",    "cover up transition",    0, AV_OPT_TYPE_CONST, {.i64=COVERUP},    0, 0, FLAGS, "transition" },
-    {   "coverdown",  "cover down transition",  0, AV_OPT_TYPE_CONST, {.i64=COVERDOWN},  0, 0, FLAGS, "transition" },
-    {   "revealleft", "reveal left transition", 0, AV_OPT_TYPE_CONST, {.i64=REVEALLEFT}, 0, 0, FLAGS, "transition" },
-    {   "revealright","reveal right transition",0, AV_OPT_TYPE_CONST, {.i64=REVEALRIGHT},0, 0, FLAGS, "transition" },
-    {   "revealup",   "reveal up transition",   0, AV_OPT_TYPE_CONST, {.i64=REVEALUP},   0, 0, FLAGS, "transition" },
-    {   "revealdown", "reveal down transition", 0, AV_OPT_TYPE_CONST, {.i64=REVEALDOWN}, 0, 0, FLAGS, "transition" },
+    { "easing", "set cross fade easing", OFFSET(easing_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
+    { "reverse", "reverse easing/transition", OFFSET(reverse), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 3, FLAGS },
+    { "transition", "set cross fade transition", OFFSET(transition_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS, .unit = "transition" },
+    {   "custom",    "custom transition",     0, AV_OPT_TYPE_CONST, {.i64=CUSTOM},    0, 0, FLAGS, .unit = "transition" },
+    {   "fade",      "fade transition",       0, AV_OPT_TYPE_CONST, {.i64=FADE},      0, 0, FLAGS, .unit = "transition" },
+    {   "wipeleft",  "wipe left transition",  0, AV_OPT_TYPE_CONST, {.i64=WIPELEFT},  0, 0, FLAGS, .unit = "transition" },
+    {   "wiperight", "wipe right transition", 0, AV_OPT_TYPE_CONST, {.i64=WIPERIGHT}, 0, 0, FLAGS, .unit = "transition" },
+    {   "wipeup",    "wipe up transition",    0, AV_OPT_TYPE_CONST, {.i64=WIPEUP},    0, 0, FLAGS, .unit = "transition" },
+    {   "wipedown",  "wipe down transition",  0, AV_OPT_TYPE_CONST, {.i64=WIPEDOWN},  0, 0, FLAGS, .unit = "transition" },
+    {   "slideleft",  "slide left transition",  0, AV_OPT_TYPE_CONST, {.i64=SLIDELEFT},  0, 0, FLAGS, .unit = "transition" },
+    {   "slideright", "slide right transition", 0, AV_OPT_TYPE_CONST, {.i64=SLIDERIGHT}, 0, 0, FLAGS, .unit = "transition" },
+    {   "slideup",    "slide up transition",    0, AV_OPT_TYPE_CONST, {.i64=SLIDEUP},    0, 0, FLAGS, .unit = "transition" },
+    {   "slidedown",  "slide down transition",  0, AV_OPT_TYPE_CONST, {.i64=SLIDEDOWN},  0, 0, FLAGS, .unit = "transition" },
+    {   "circlecrop", "circle crop transition", 0, AV_OPT_TYPE_CONST, {.i64=CIRCLECROP}, 0, 0, FLAGS, .unit = "transition" },
+    {   "rectcrop",   "rect crop transition",   0, AV_OPT_TYPE_CONST, {.i64=RECTCROP},   0, 0, FLAGS, .unit = "transition" },
+    {   "distance",   "distance transition",    0, AV_OPT_TYPE_CONST, {.i64=DISTANCE},   0, 0, FLAGS, .unit = "transition" },
+    {   "fadeblack",  "fadeblack transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEBLACK},  0, 0, FLAGS, .unit = "transition" },
+    {   "fadewhite",  "fadewhite transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEWHITE},  0, 0, FLAGS, .unit = "transition" },
+    {   "radial",     "radial transition",      0, AV_OPT_TYPE_CONST, {.i64=RADIAL},     0, 0, FLAGS, .unit = "transition" },
+    {   "smoothleft", "smoothleft transition",  0, AV_OPT_TYPE_CONST, {.i64=SMOOTHLEFT}, 0, 0, FLAGS, .unit = "transition" },
+    {   "smoothright","smoothright transition", 0, AV_OPT_TYPE_CONST, {.i64=SMOOTHRIGHT},0, 0, FLAGS, .unit = "transition" },
+    {   "smoothup",   "smoothup transition",    0, AV_OPT_TYPE_CONST, {.i64=SMOOTHUP},   0, 0, FLAGS, .unit = "transition" },
+    {   "smoothdown", "smoothdown transition",  0, AV_OPT_TYPE_CONST, {.i64=SMOOTHDOWN}, 0, 0, FLAGS, .unit = "transition" },
+    {   "circleopen", "circleopen transition",  0, AV_OPT_TYPE_CONST, {.i64=CIRCLEOPEN}, 0, 0, FLAGS, .unit = "transition" },
+    {   "circleclose","circleclose transition", 0, AV_OPT_TYPE_CONST, {.i64=CIRCLECLOSE},0, 0, FLAGS, .unit = "transition" },
+    {   "vertopen",   "vert open transition",   0, AV_OPT_TYPE_CONST, {.i64=VERTOPEN},   0, 0, FLAGS, .unit = "transition" },
+    {   "vertclose",  "vert close transition",  0, AV_OPT_TYPE_CONST, {.i64=VERTCLOSE},  0, 0, FLAGS, .unit = "transition" },
+    {   "horzopen",   "horz open transition",   0, AV_OPT_TYPE_CONST, {.i64=HORZOPEN},   0, 0, FLAGS, .unit = "transition" },
+    {   "horzclose",  "horz close transition",  0, AV_OPT_TYPE_CONST, {.i64=HORZCLOSE},  0, 0, FLAGS, .unit = "transition" },
+    {   "dissolve",   "dissolve transition",    0, AV_OPT_TYPE_CONST, {.i64=DISSOLVE},   0, 0, FLAGS, .unit = "transition" },
+    {   "pixelize",   "pixelize transition",    0, AV_OPT_TYPE_CONST, {.i64=PIXELIZE},   0, 0, FLAGS, .unit = "transition" },
+    {   "diagtl",     "diag tl transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGTL},     0, 0, FLAGS, .unit = "transition" },
+    {   "diagtr",     "diag tr transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGTR},     0, 0, FLAGS, .unit = "transition" },
+    {   "diagbl",     "diag bl transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGBL},     0, 0, FLAGS, .unit = "transition" },
+    {   "diagbr",     "diag br transition",     0, AV_OPT_TYPE_CONST, {.i64=DIAGBR},     0, 0, FLAGS, .unit = "transition" },
+    {   "hlslice",    "hl slice transition",    0, AV_OPT_TYPE_CONST, {.i64=HLSLICE},    0, 0, FLAGS, .unit = "transition" },
+    {   "hrslice",    "hr slice transition",    0, AV_OPT_TYPE_CONST, {.i64=HRSLICE},    0, 0, FLAGS, .unit = "transition" },
+    {   "vuslice",    "vu slice transition",    0, AV_OPT_TYPE_CONST, {.i64=VUSLICE},    0, 0, FLAGS, .unit = "transition" },
+    {   "vdslice",    "vd slice transition",    0, AV_OPT_TYPE_CONST, {.i64=VDSLICE},    0, 0, FLAGS, .unit = "transition" },
+    {   "hblur",      "hblur transition",       0, AV_OPT_TYPE_CONST, {.i64=HBLUR},      0, 0, FLAGS, .unit = "transition" },
+    {   "fadegrays",  "fadegrays transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEGRAYS},  0, 0, FLAGS, .unit = "transition" },
+    {   "wipetl",     "wipe tl transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPETL},     0, 0, FLAGS, .unit = "transition" },
+    {   "wipetr",     "wipe tr transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPETR},     0, 0, FLAGS, .unit = "transition" },
+    {   "wipebl",     "wipe bl transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPEBL},     0, 0, FLAGS, .unit = "transition" },
+    {   "wipebr",     "wipe br transition",     0, AV_OPT_TYPE_CONST, {.i64=WIPEBR},     0, 0, FLAGS, .unit = "transition" },
+    {   "squeezeh",   "squeeze h transition",   0, AV_OPT_TYPE_CONST, {.i64=SQUEEZEH},   0, 0, FLAGS, .unit = "transition" },
+    {   "squeezev",   "squeeze v transition",   0, AV_OPT_TYPE_CONST, {.i64=SQUEEZEV},   0, 0, FLAGS, .unit = "transition" },
+    {   "zoomin",     "zoom in transition",     0, AV_OPT_TYPE_CONST, {.i64=ZOOMIN},     0, 0, FLAGS, .unit = "transition" },
+    {   "fadefast",   "fast fade transition",   0, AV_OPT_TYPE_CONST, {.i64=FADEFAST},   0, 0, FLAGS, .unit = "transition" },
+    {   "fadeslow",   "slow fade transition",   0, AV_OPT_TYPE_CONST, {.i64=FADESLOW},   0, 0, FLAGS, .unit = "transition" },
+    {   "hlwind",     "hl wind transition",     0, AV_OPT_TYPE_CONST, {.i64=HLWIND},     0, 0, FLAGS, .unit = "transition" },
+    {   "hrwind",     "hr wind transition",     0, AV_OPT_TYPE_CONST, {.i64=HRWIND},     0, 0, FLAGS, .unit = "transition" },
+    {   "vuwind",     "vu wind transition",     0, AV_OPT_TYPE_CONST, {.i64=VUWIND},     0, 0, FLAGS, .unit = "transition" },
+    {   "vdwind",     "vd wind transition",     0, AV_OPT_TYPE_CONST, {.i64=VDWIND},     0, 0, FLAGS, .unit = "transition" },
+    {   "coverleft",  "cover left transition",  0, AV_OPT_TYPE_CONST, {.i64=COVERLEFT},  0, 0, FLAGS, .unit = "transition" },
+    {   "coverright", "cover right transition", 0, AV_OPT_TYPE_CONST, {.i64=COVERRIGHT}, 0, 0, FLAGS, .unit = "transition" },
+    {   "coverup",    "cover up transition",    0, AV_OPT_TYPE_CONST, {.i64=COVERUP},    0, 0, FLAGS, .unit = "transition" },
+    {   "coverdown",  "cover down transition",  0, AV_OPT_TYPE_CONST, {.i64=COVERDOWN},  0, 0, FLAGS, .unit = "transition" },
+    {   "revealleft", "reveal left transition", 0, AV_OPT_TYPE_CONST, {.i64=REVEALLEFT}, 0, 0, FLAGS, .unit = "transition" },
+    {   "revealright","reveal right transition",0, AV_OPT_TYPE_CONST, {.i64=REVEALRIGHT},0, 0, FLAGS, .unit = "transition" },
+    {   "revealup",   "reveal up transition",   0, AV_OPT_TYPE_CONST, {.i64=REVEALUP},   0, 0, FLAGS, .unit = "transition" },
+    {   "revealdown", "reveal down transition", 0, AV_OPT_TYPE_CONST, {.i64=REVEALDOWN}, 0, 0, FLAGS, .unit = "transition" },
     { "duration", "set cross fade duration", OFFSET(duration), AV_OPT_TYPE_DURATION, {.i64=1000000}, 0, 60000000, FLAGS },
     { "offset",   "set cross fade start relative to first input stream", OFFSET(offset), AV_OPT_TYPE_DURATION, {.i64=0}, INT64_MIN, INT64_MAX, FLAGS },
     { "expr",   "set expression for custom transition", OFFSET(custom_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
@@ -2002,10 +2011,12 @@ REVEALV_TRANSITION(up,   16, uint16_t, 2, -)
 REVEALV_TRANSITION(down,  8, uint8_t,  1, )
 REVEALV_TRANSITION(down, 16, uint16_t, 2, )
 
+#include "xfade-easing.h" // easing & extended transitions
+
 static inline double getpix(void *priv, double x, double y, int plane, int nb)
 {
     XFadeContext *s = priv;
-    AVFrame *in = s->xf[nb];
+    AVFrame *in = s->xf[nb ^ s->reverse & REVERSE_TRANSITION];
     const uint8_t *src = in->data[FFMIN(plane, s->nb_planes - 1)];
     int linesize = in->linesize[FFMIN(plane, s->nb_planes - 1)];
     const int w = in->width;
@@ -2100,6 +2111,9 @@ static int config_output(AVFilterLink *outlink)
     if (s->duration)
         s->duration_pts = av_rescale_q(s->duration, AV_TIME_BASE_Q, outlink->time_base);
 
+    int ret = config_xfade_easing(ctx);
+    if (ret <= 0) return ret; // error or extended transition
+
     switch (s->transition) {
     case CUSTOM:     s->transitionf = s->depth <= 8 ? custom8_transition     : custom16_transition;     break;
     case FADE:       s->transitionf = s->depth <= 8 ? fade8_transition       : fade16_transition;       break;
@@ -2193,8 +2207,12 @@ static int xfade_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
     ThreadData *td = arg;
     int slice_start = (outlink->h *  jobnr   ) / nb_jobs;
     int slice_end   = (outlink->h * (jobnr+1)) / nb_jobs;
+    int i = s->reverse & REVERSE_TRANSITION; // input 0 or 1
+    float p = td->progress;
 
-    s->transitionf(ctx, td->xf[0], td->xf[1], td->out, td->progress, slice_start, slice_end, jobnr);
+    p = (s->reverse & REVERSE_EASING) ? 1 - ease(s, 1 - p) : ease(s, p); // eased progress
+    if (i) p = 1 - p;
+    s->transitionf(ctx, td->xf[i], td->xf[i ^ 1], td->out, p, slice_start, slice_end, jobnr);
 
     return 0;
 }
