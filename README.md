@@ -5,7 +5,7 @@ To build a static version of this branch for linux-x86_64:
 * clone `https://github.com/BtbN/FFmpeg-Builds`
 * `./makeimage.sh linux64 gpl`
   * this can take > 1 hr. on an older system and caches ~15GB of data, but it only needs to be run once
-* `FFMPEG_REPO="https://github.com/spokestack/FFmpeg.git" GIT_BRANCH_OVERRIDE=xfade-6.1 ./build.sh linux64 gpl 7.0`
+* `FFMPEG_REPO="https://github.com/spokestack/FFmpeg.git" GIT_BRANCH_OVERRIDE=xfade-6.1 ./build.sh linux64 gpl 6.1`
 
 _original readme below_
 ---
