@@ -1,3 +1,15 @@
+# custom FFmpeg
+This is a customized version of FFmpeg 6.1 that includes built-in support for easing and native C ports of some OpenGL transitions from [scriptituk's `xfade-easing` repository](https://github.com/scriptituk/xfade-easing).
+
+To build a static version of this branch for linux-x86_64:
+* clone `https://github.com/BtbN/FFmpeg-Builds`
+* `./makeimage.sh linux64 gpl`
+  * this can take > 1 hr. on an older system and caches ~15GB of data, but it only needs to be run once
+* `FFMPEG_REPO="https://github.com/spokestack/FFmpeg.git" GIT_BRANCH_OVERRIDE=xfade-6.1 ./build.sh linux64 gpl 7.0`
+
+_original readme below_
+---
+
 FFmpeg README
 =============
 
